@@ -112,24 +112,59 @@
 
 自動化設定 DNS 正向和反向查詢區，並新增所需的主機記錄和 PTR 記錄。
 
+**前置需求：**
+- 已執行 01-creatAD.ps1 或 03-installADDSForest.ps1
+- 伺服器已成為網域控制站
+- AD DS 服務正在執行
+
 **主要功能：**
-- 安裝 DNS Server 角色
-- 建立正向查詢區（Forward Lookup Zone）：tcivs.com.tw
-- 建立反向查詢區（Reverse Lookup Zone）：172.16.xx.0/24
-- 自動新增主機記錄：
-  - Branch-xx (172.16.xx.254)
-  - Business-xx (172.16.xx.100)
-  - HR-xx (172.16.xx.200)
-  - Customer-xx (172.16.xx.50)
-  - www（指向 Branch-xx）
-  - linux（指向 Business-xx）
-- 自動新增對應的 PTR（反向解析）記錄
+- **Step 0**: 前置檢查
+  - 驗證是否為網域控制站
+  - 檢查 AD DS 服務狀態
+  - 自動偵測並使用實際 AD 網域名稱
+- **Step 1**: 計算 IP 位址和區域名稱
+- **Step 2**: 確認並安裝 DNS Server 角色（智能檢測已安裝的 DNS）
+- **Step 3**: 建立 AD 整合的正向查詢區（Forward Lookup Zone: tcivs.com.tw）
+- **Step 4**: 建立 AD 整合的反向查詢區（Reverse Lookup Zone: 172.16.xx.0/24）
+- **Step 5**: 自動新增主機記錄：
+  - Branch-xx (172.16.xx.254) - 主要伺服器 + PTR
+  - Business-xx (172.16.xx.100) - Fedora 商務主機 + PTR
+  - HR-xx (172.16.xx.200) - 人力資源主機 + PTR
+  - Customer-xx (172.16.xx.50) - 客戶主機（僅 A 記錄）
+  - www（指向 Branch-xx）+ PTR
+  - linux（指向 Business-xx）+ PTR
+- **Step 6**: 部署後驗證
+  - 列出所有 DNS 區域
+  - 顯示 A 記錄和 PTR 記錄
+  - 測試所有主機的 DNS 解析
+
+**PowerShell 規範改進：**
+- ✅ 函式命名符合規範：`Add-DnsRecordWithPtr`（原為 `Add-A-and-PTR`）
+- ✅ 添加 `[CmdletBinding()]` 支援進階功能
+- ✅ 參數添加 `[Parameter()]` 屬性和完整驗證
+- ✅ 添加詳細的說明文件區塊（Comment-Based Help）
+- ✅ 改進錯誤處理機制（Try-Catch）
 
 **參數：**
-- `DomainFqdn`：網域名稱（預設：tcivs.com.tw）
+- `DomainFqdn`：網域名稱（預設：tcivs.com.tw，自動偵測 AD 網域）
 - `SitePrefix`：IP 前綴（預設：172.16）
-- `XX`：崗位編號（預設：01）
+- `XX`：崗位編號（預設：01，支援 01-99）
 - `BranchName`、`BusinessName`、`HRName`、`CustomerName`：各主機名稱
+
+**使用範例：**
+```powershell
+# 使用預設值（崗位 01）
+.\07-DNS_ForwRever.ps1
+
+# 指定崗位編號
+.\07-DNS_ForwRever.ps1 -XX "15"
+
+# 完整參數
+.\07-DNS_ForwRever.ps1 -XX "15" -BranchName "Branch-15" -BusinessName "Business-15"
+
+# 查看說明
+Get-Help .\07-DNS_ForwRever.ps1 -Detailed
+```
 
 ---
 
