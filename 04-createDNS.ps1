@@ -40,24 +40,76 @@ param(
     
     [Parameter(HelpMessage = "崗位編號（01-99），用於組成 IP 位址的第三個八位元組")]
     [ValidatePattern('^\d{1,2}$')]
-    [string]$XX = "01",
+    [string]$XX = "",
     
     [Parameter(HelpMessage = "Branch 主機名稱")]
     [ValidateNotNullOrEmpty()]
-    [string]$BranchName = "Branch-01",
+    [string]$BranchName = "",
     
     [Parameter(HelpMessage = "Business 主機名稱（Fedora）")]
     [ValidateNotNullOrEmpty()]
-    [string]$BusinessName = "Business-01",
+    [string]$BusinessName = "",
     
     [Parameter(HelpMessage = "HR 主機名稱")]
     [ValidateNotNullOrEmpty()]
-    [string]$HRName = "HR-01",
+    [string]$HRName = "",
     
     [Parameter(HelpMessage = "Customer 主機名稱")]
     [ValidateNotNullOrEmpty()]
-    [string]$CustomerName = "Customer-01"
+    [string]$CustomerName = ""
 )
+
+# ===============================
+# 互動式輸入區段
+# ===============================
+Write-Host "===============================================================================" -ForegroundColor Cyan
+Write-Host "  Windows Server 2022 - DNS 正反向查詢區設定" -ForegroundColor Cyan
+Write-Host "===============================================================================`n" -ForegroundColor Cyan
+
+# 如果未提供崗位編號，則提示輸入
+if ([string]::IsNullOrWhiteSpace($XX)) {  # 檢查崗位編號是否為空
+    $XX = Read-Host "請輸入崗位編號（例如：01）"  # 提示使用者輸入崗位編號
+    if ([string]::IsNullOrWhiteSpace($XX)) {  # 若仍為空則使用預設值
+        $XX = "01"  # 設定預設崗位編號為 01
+        Write-Host "使用預設崗位編號：$XX" -ForegroundColor Yellow  # 顯示使用預設值訊息
+    }
+}
+
+# 如果未提供 Branch 主機名稱，則提示輸入
+if ([string]::IsNullOrWhiteSpace($BranchName)) {  # 檢查 Branch 主機名稱是否為空
+    $defaultBranch = "Branch-$XX"  # 根據崗位編號建立預設主機名稱
+    $inputBranch = Read-Host "請輸入 Branch 主機名稱（按 Enter 使用預設值：$defaultBranch）"  # 提示使用者輸入或使用預設值
+    $BranchName = if ([string]::IsNullOrWhiteSpace($inputBranch)) { $defaultBranch } else { $inputBranch }  # 若使用者未輸入則使用預設值
+    Write-Host "Branch 主機名稱：$BranchName" -ForegroundColor Green  # 顯示最終使用的主機名稱
+}
+
+# 如果未提供 Business 主機名稱，則提示輸入
+if ([string]::IsNullOrWhiteSpace($BusinessName)) {  # 檢查 Business 主機名稱是否為空
+    $defaultBusiness = "Business-$XX"  # 根據崗位編號建立預設主機名稱
+    $inputBusiness = Read-Host "請輸入 Business 主機名稱（按 Enter 使用預設值：$defaultBusiness）"  # 提示使用者輸入或使用預設值
+    $BusinessName = if ([string]::IsNullOrWhiteSpace($inputBusiness)) { $defaultBusiness } else { $inputBusiness }  # 若使用者未輸入則使用預設值
+    Write-Host "Business 主機名稱：$BusinessName" -ForegroundColor Green  # 顯示最終使用的主機名稱
+}
+
+# 如果未提供 HR 主機名稱，則提示輸入
+if ([string]::IsNullOrWhiteSpace($HRName)) {  # 檢查 HR 主機名稱是否為空
+    $defaultHR = "HR-$XX"  # 根據崗位編號建立預設主機名稱
+    $inputHR = Read-Host "請輸入 HR 主機名稱（按 Enter 使用預設值：$defaultHR）"  # 提示使用者輸入或使用預設值
+    $HRName = if ([string]::IsNullOrWhiteSpace($inputHR)) { $defaultHR } else { $inputHR }  # 若使用者未輸入則使用預設值
+    Write-Host "HR 主機名稱：$HRName" -ForegroundColor Green  # 顯示最終使用的主機名稱
+}
+
+# 如果未提供 Customer 主機名稱，則提示輸入
+if ([string]::IsNullOrWhiteSpace($CustomerName)) {  # 檢查 Customer 主機名稱是否為空
+    $defaultCustomer = "Customer-$XX"  # 根據崗位編號建立預設主機名稱
+    $inputCustomer = Read-Host "請輸入 Customer 主機名稱（按 Enter 使用預設值：$defaultCustomer）"  # 提示使用者輸入或使用預設值
+    $CustomerName = if ([string]::IsNullOrWhiteSpace($inputCustomer)) { $defaultCustomer } else { $inputCustomer }  # 若使用者未輸入則使用預設值
+    Write-Host "Customer 主機名稱：$CustomerName" -ForegroundColor Green  # 顯示最終使用的主機名稱
+}
+
+Write-Host "`n按任意鍵繼續..." -ForegroundColor Yellow  # 提示使用者確認輸入
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")  # 等待使用者按鍵
+Write-Host ""  # 空行分隔
 
 ### ======================================================================
 ### Step 0. 前置檢查（確保能接續 01~06 腳本）
