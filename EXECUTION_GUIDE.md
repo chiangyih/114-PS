@@ -11,7 +11,7 @@
 | 編號 | 檔案名稱 | 功能說明 | 需重啟 | 備註 |
 |------|----------|----------|--------|------|
 | 00 | `00-renameComputer.ps1` | 重新命名電腦為 Branch-XX | ✅ | 第一步執行 |
-| 01 | `01-setStaticIP.ps1` | 設定固定 IP 位址 | ❌ | 設定後建議驗證網路連線 |
+| 01 | `01-setStaticIP.ps1` | 設定兩張網卡固定 IP（LAN+WAN） | ❌ | 根據表A規格自動設定 |
 
 ### 階段 2：Active Directory 網域服務
 
@@ -76,7 +76,7 @@
 ```powershell
 # 1. 系統初始化
 .\00-renameComputer.ps1          # 重新命名 → 重啟
-.\01-setStaticIP.ps1             # 設定 IP
+.\01-setStaticIP.ps1             # 設定兩張網卡 IP（LAN: 172.16.xx.254, WAN: 120.118.xx.1）
 
 # 2. 建立網域
 .\02-installADDS.ps1             # 安裝 AD DS → 重啟

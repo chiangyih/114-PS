@@ -6,7 +6,7 @@
 
 | 檔案 | 功能 | 對應 PLAN.md |
 |------|------|-------------|
-| `01-setStaticIP.ps1` | 設定固定 IP 位址 | 2.2 設定固定 IP |
+| `01-setStaticIP.ps1` | 設定雙網卡固定 IP（LAN+WAN） | 2.2 設定固定 IP |
 | `07-createUsers.ps1` | 建立 Sales01-100 使用者 | 2. AddUser.ps1 |
 | `08-removeUsers.ps1` | 刪除奇數/偶數使用者 | 2. RemoveUser.ps1 |
 | `09-installDHCP.ps1` | 安裝與設定 DHCP | 7. DHCP 設定 |
@@ -43,7 +43,7 @@
 
 ```
 00-renameComputer.ps1          ✅ 已有詳細註解
-01-setStaticIP.ps1             ✅ 新建立 + 詳細註解
+01-setStaticIP.ps1             ✅ 新建立 + 詳細註解 + 雙網卡支援（表A規格）
 02-installADDS.ps1             ✅ 已有詳細註解
 03-verifyAD.ps1                ✅ 已有詳細註解
 04-createDNS.ps1               ✅ 已有詳細註解 + 互動式輸入

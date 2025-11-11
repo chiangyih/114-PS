@@ -10,7 +10,7 @@
 |-------------|---------|----------|------|
 | **0. 系統初始化** |
 | 重新命名電腦 | 00 | `00-renameComputer.ps1` | ✅ |
-| 設定固定 IP | 01 | `01-setStaticIP.ps1` | ✅ |
+| 設定固定 IP（雙網卡） | 01 | `01-setStaticIP.ps1` | ✅ |
 | **1. 建立 AD DS** |
 | 安裝 AD DS 角色 | 02 | `02-installADDS.ps1` | ✅ |
 | 建立網域 tcivs.com.tw | 02 | `02-installADDS.ps1` | ✅ |
@@ -55,7 +55,7 @@
 
 ### 🔧 系統設定
 - `00-renameComputer.ps1` - 電腦重新命名
-- `01-setStaticIP.ps1` - IP 位址設定
+- `01-setStaticIP.ps1` - 雙網卡 IP 位址設定（LAN+WAN，根據表A規格）
 - `15-configureSecurity.ps1` - 安全性設定
 
 ### 🌐 網域服務
