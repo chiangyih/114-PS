@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # ===============================
 #  Linux (Fedora) 加入 Active Directory 網域
 #  用於 Business-xx 等 Linux 電腦加入 tcivs.com.tw 網域

@@ -1,4 +1,4 @@
-# ===============================
+﻿# ===============================
 #  Windows Server 2022 - 重新命名電腦
 #  根據 113 年工科技藝競賽要求
 # ===============================
@@ -8,7 +8,7 @@ $NewComputerName = Read-Host "請輸入伺服器主機名稱（例如：Branch-0
 
 # 驗證輸入不為空
 if ([string]::IsNullOrWhiteSpace($NewComputerName)) {  # 檢查使用者輸入是否為空白或空字串
-    Write-Host "❌ 錯誤：主機名稱不能為空！" -ForegroundColor Red  # 以紅色顯示錯誤訊息
+    Write-Host "[錯誤] 主機名稱不能為空！" -ForegroundColor Red  # 以紅色顯示錯誤訊息
     exit  # 結束腳本執行
 }
 
@@ -23,5 +23,5 @@ if ($Confirm -eq 'Y' -or $Confirm -eq 'y') {  # 檢查使用者輸入是否為 Y
     Write-Host "`n正在重新命名電腦..." -ForegroundColor Cyan  # 以青色顯示執行訊息
     Rename-Computer -NewName $NewComputerName -Restart  # 執行重新命名電腦的命令，並在完成後自動重新啟動系統
 } else {  # 使用者選擇不繼續
-    Write-Host "❌ 已取消重新命名作業" -ForegroundColor Red  # 以紅色顯示取消訊息
+    Write-Host "[取消] 已取消重新命名作業" -ForegroundColor Red  # 以紅色顯示取消訊息
 }
