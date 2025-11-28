@@ -1,86 +1,75 @@
-﻿# ===============================
-#  Windows Server 2022 - 設定 NTP 授時伺服器
-#  將 Branch-xx 設為網域的授時伺服器
+# ===============================
+#  Windows Server 2022 - 設定 NTP 時間來源
+#  目的：Branch-xx 作為網域時間來源，預設指向 time.tcivs.com.tw（可自訂）
 # ===============================
 
-Write-Host "===============================================================================" -ForegroundColor Cyan
-Write-Host "  設定 NTP 授時伺服器" -ForegroundColor Cyan
-Write-Host "===============================================================================`n" -ForegroundColor Cyan
+[CmdletBinding()]
+param(
+    [string]$NtpServers = "time.tcivs.com.tw"
+)
 
-# 步驟 1：設定本機為可靠的時間來源
-Write-Host "步驟 1：設定本機為可靠的時間來源..." -ForegroundColor Cyan  # 顯示進度
-try {
-    # 設定本機時鐘為可靠的時間來源
-    w32tm /config /reliable:YES  # 將本機設定為可靠的時間來源，適用於網域的 PDC 模擬器
-    Write-Host "✓ 已將本機設定為可靠的時間來源" -ForegroundColor Green  # 設定完成
-} catch {
-    Write-Host "✗ 設定失敗：$($_.Exception.Message)" -ForegroundColor Red  # 顯示錯誤訊息
+function Write-Result {
+    param([bool]$Ok,[string]$Message)
+    if ($Ok) { Write-Host "[通過] $Message" -ForegroundColor Green }
+    else { Write-Host "[失敗] $Message" -ForegroundColor Red }
+}
+function Write-Warn($msg){ Write-Host "[警告] $msg" -ForegroundColor Yellow }
+
+# ===== 權限與角色檢查 =====
+$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+    Write-Result $false "請以系統管理員身分執行此腳本。"
+    exit 1
 }
 
-# 步驟 2：設定外部 NTP 伺服器（可選）
-Write-Host "`n步驟 2：設定外部 NTP 伺服器..." -ForegroundColor Cyan  # 顯示進度
-$UseExternalNTP = Read-Host "是否要設定外部 NTP 伺服器？(Y/N)"  # 詢問是否設定外部 NTP
-
-if ($UseExternalNTP -eq 'Y' -or $UseExternalNTP -eq 'y') {  # 若選擇是
-    # 建議使用台灣的 NTP 伺服器
-    $NTPServers = "time.stdtime.gov.tw,tock.stdtime.gov.tw,watch.stdtime.gov.tw"  # 台灣國家時間與頻率標準實驗室的 NTP 伺服器
-    
-    Write-Host "使用 NTP 伺服器：$NTPServers" -ForegroundColor White  # 顯示 NTP 伺服器
-    
-    try {
-        # 設定 NTP 伺服器
-        w32tm /config /manualpeerlist:$NTPServers /syncfromflags:manual /update  # 手動設定 NTP 伺服器清單並更新設定
-        Write-Host "✓ 已設定外部 NTP 伺服器" -ForegroundColor Green  # 設定完成
-    } catch {
-        Write-Host "✗ 設定外部 NTP 伺服器失敗：$($_.Exception.Message)" -ForegroundColor Red  # 顯示錯誤訊息
+# 確認是否為 PDC Emulator（建議在 PDC 上設定時間來源）
+try {
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $pdc = Get-ADDomainController -Discover -Service PrimaryDC -ErrorAction Stop
+    if ($pdc.HostName -ne $env:COMPUTERNAME) {
+        Write-Warn "建議在 PDC Emulator ($($pdc.HostName)) 上設定外部 NTP。此機器為 $($env:COMPUTERNAME)。"
     }
-} else {
-    Write-Host "⊙ 略過外部 NTP 伺服器設定（使用本機時鐘）" -ForegroundColor Yellow  # 略過設定
-}
-
-# 步驟 3：設定 Windows Time 服務為自動啟動
-Write-Host "`n步驟 3：設定 Windows Time 服務..." -ForegroundColor Cyan  # 顯示進度
-try {
-    Set-Service W32Time -StartupType Automatic  # 設定 Windows Time 服務為自動啟動
-    Write-Host "✓ Windows Time 服務已設定為自動啟動" -ForegroundColor Green  # 設定完成
 } catch {
-    Write-Host "✗ 設定服務失敗：$($_.Exception.Message)" -ForegroundColor Red  # 顯示錯誤訊息
+    Write-Warn "無法確認 PDC Emulator：$($_.Exception.Message)；若為單一 DC 可忽略。"
 }
 
-# 步驟 4：重新啟動 Windows Time 服務
-Write-Host "`n步驟 4：重新啟動 Windows Time 服務..." -ForegroundColor Cyan  # 顯示進度
-try {
-    Restart-Service W32Time  # 重新啟動 Windows Time 服務以套用設定
-    Write-Host "✓ Windows Time 服務已重新啟動" -ForegroundColor Green  # 重新啟動完成
-} catch {
-    Write-Host "✗ 重新啟動服務失敗：$($_.Exception.Message)" -ForegroundColor Red  # 顯示錯誤訊息
-}
-
-# 步驟 5：強制立即同步時間
-Write-Host "`n步驟 5：強制同步時間..." -ForegroundColor Cyan  # 顯示進度
-try {
-    w32tm /resync /rediscover  # 重新探索時間來源並強制同步時間
-    Write-Host "✓ 時間同步完成" -ForegroundColor Green  # 同步完成
-} catch {
-    Write-Host "⊙ 同步時可能發生警告（這是正常的）" -ForegroundColor Yellow  # 顯示警告訊息
-}
-
-# 步驟 6：設定網域時間階層（Group Policy）
-Write-Host "`n步驟 6：設定網域時間階層..." -ForegroundColor Cyan  # 顯示進度
-Write-Host "⊙ 網域成員電腦會自動從網域控制站同步時間" -ForegroundColor Yellow  # 說明
-Write-Host "⊙ 如需強制網域電腦同步，請在各電腦上執行：w32tm /resync" -ForegroundColor Yellow  # 提示
-
-# 顯示完成訊息和驗證資訊
-Write-Host "`n===============================================================================" -ForegroundColor Cyan
-Write-Host "  NTP 授時伺服器設定完成" -ForegroundColor Green
 Write-Host "===============================================================================" -ForegroundColor Cyan
-Write-Host "`n驗證命令：" -ForegroundColor Yellow
-Write-Host "  w32tm /query /status" -ForegroundColor Gray  # 查詢時間服務狀態
-Write-Host "  w32tm /query /configuration" -ForegroundColor Gray  # 查詢時間服務設定
-Write-Host "  w32tm /query /peers" -ForegroundColor Gray  # 查詢時間對等端
-Write-Host "  Get-Service W32Time" -ForegroundColor Gray  # 查詢服務狀態
-Write-Host ""  # 空行
+Write-Host "  設定 NTP 時間來源" -ForegroundColor Cyan
+Write-Host "===============================================================================`n" -ForegroundColor Cyan
+Write-Host "外部時間來源：$NtpServers" -ForegroundColor White
 
-# 顯示目前狀態
-Write-Host "目前時間服務狀態：" -ForegroundColor Cyan  # 顯示標題
-w32tm /query /status  # 執行查詢命令顯示詳細狀態
+$confirm = Read-Host "確認套用設定並重新啟動 W32Time？ (Y/N)"
+if ($confirm -notin @('Y','y')) { Write-Host "[取消] 未變更。" -ForegroundColor Red; exit 0 }
+
+# ===== 設定為可靠時間來源並指向外部 NTP =====
+try {
+    w32tm /config /manualpeerlist:$NtpServers /syncfromflags:manual /reliable:YES /update
+    Write-Result $true "已設定 NTP 來源並標記為可靠時間來源"
+} catch {
+    Write-Result $false "設定 NTP 來源失敗：$($_.Exception.Message)"
+    exit 1
+}
+
+# ===== 設定服務自動並重新啟動 =====
+try {
+    Set-Service W32Time -StartupType Automatic
+    Restart-Service W32Time
+    Write-Result $true "Windows Time 服務已重新啟動"
+} catch {
+    Write-Result $false "重啟 W32Time 服務失敗：$($_.Exception.Message)"
+}
+
+# ===== 立即同步 =====
+try {
+    w32tm /resync /rediscover
+    Write-Result $true "已觸發立即同步"
+} catch {
+    Write-Warn "同步命令回傳錯誤（可能需稍後重試）：$($_.Exception.Message)"
+}
+
+Write-Host "`n可用以下指令檢查狀態：" -ForegroundColor Cyan
+Write-Host "  w32tm /query /status"
+Write-Host "  w32tm /query /configuration"
+Write-Host "  w32tm /query /peers"
+Write-Host ""
+Write-Host "[完成] NTP 設定已套用。" -ForegroundColor Green
