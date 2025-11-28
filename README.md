@@ -39,98 +39,146 @@
 ---
 
 #### 01-setStaticIP.ps1
-**功能：設定兩張網卡固定 IP 位址（根據表A規格）**
+**功能：設定雙網卡靜態 IP 位址（根據校賽規格表A）**
 
 **表A規格**：
-| Interface | IP Address |
-|-----------|------------|
-| LAN | 172.16.xx.254/24 |
-| WAN | 120.118.xx.1/24 |
+| Interface | IP Address | 說明 |
+|-----------|------------|------|
+| LAN | 172.16.xx.254/24 | 內部網路，DNS: 127.0.0.1 |
+| WAN | 120.118.xx.1/24 | 外部網路，DNS: 無 |
 
 **主要功能**：
-- 提示輸入崗位編號（例如：01）
-- 自動計算 LAN IP：172.16.XX.254/24
-- 自動計算 WAN IP：120.118.XX.1/24
-- 顯示所有可用網路介面卡
-- 互動式選擇 LAN 和 WAN 網卡
+- ✅ 支持未插網線狀態設定
+- ✅ 顯示目前所有網路介面卡清單
+- ✅ 互動式輸入組別編號（例如：01）
+- ✅ 自動計算 LAN IP：172.16.XX.254/24
+- ✅ 自動計算 WAN IP：120.118.XX.1/24
+- ✅ 互動式選擇 LAN 和 WAN 介面名稱
+- ✅ 自動重新命名網卡為 "LAN" 和 "WAN"
+- ✅ 自動移除舊有 IPv4 設定與路由
+- ✅ 完整的錯誤處理機制
 
 **LAN 網卡設定**：
+- 介面名稱：自動重新命名為 "LAN"
 - IP 位址：172.16.XX.254
 - 子網路遮罩：/24
-- DNS 伺服器：127.0.0.1（本機）
-- 預設閘道：無（內部網路）
+- DNS 伺服器：127.0.0.1（本機網域控制站）
+- 預設閘道：172.16.XX.1（可選）
 
 **WAN 網卡設定**：
+- 介面名稱：自動重新命名為 "WAN"
 - IP 位址：120.118.XX.1
 - 子網路遮罩：/24
 - DNS 伺服器：無
-- 預設閘道：無
+- 預設閘道：無（根據校賽規格）
 
 **執行流程**：
-1. 顯示所有網路介面卡清單
-2. 輸入崗位編號
-3. 選擇 LAN 網卡介面名稱
-4. 選擇 WAN 網卡介面名稱
-5. 確認設定並執行
-6. 驗證設定結果
+1. 顯示目前所有網路介面卡清單
+2. 輸入組別編號（xx）
+3. 輸入 LAN 介面的目前名稱（從列表複製）
+4. 輸入 WAN 介面的目前名稱（從列表複製）
+5. 預覽設定內容
+6. 確認套用設定
+7. 自動重新命名為 LAN / WAN
+8. 套用 IPv4 與 DNS 設定
+9. 驗證最終設定結果
+
+**特色改進**：
+- 🔧 重新命名網卡為標準名稱（LAN、WAN）
+- 🛡️ 加入 Try-Catch 錯誤處理
+- 📋 支援複製貼上介面名稱
+- ⚡ 先啟用介面卡再設定（支援未插線狀態）
+- 🔄 自動清理舊有 IPv4 路由表
 
 ---
 
 ### 階段 2：Active Directory 網域服務
 
 #### 02-installADDS.ps1
-**功能：安裝 AD DS 並建立網域樹系**
+**功能：安裝 AD DS 並建立網域樹系（支援自訂網域名稱）**
 
-- 安裝 AD-Domain-Services 角色與管理工具
-- 建立新的 AD 樹系與網域（tcivs.com.tw）
-- 自動安裝並整合 DNS 服務
-- 設定 DSRM（目錄服務還原模式）密碼
+**主要功能**：
+- ✅ 系統管理員權限檢查
+- ✅ 可自訂網域 FQDN（預設：tcivs.com.tw）
+- ✅ 自動推算 NetBIOS 名稱（取第一段轉大寫，最多 15 字）
+- ✅ 允許手動覆寫 NetBIOS 名稱
+- ✅ 互動式輸入 DSRM 密碼（安全字串）
+- ✅ 檢查是否已有網域（避免重複安裝）
+- ✅ 安裝 AD-Domain-Services 角色與管理工具
+- ✅ 自動安裝並整合 DNS 服務
 
-**主要設定**：
-- 網域名稱：tcivs.com.tw
-- NetBIOS 名稱：TCIVS
-- 整合 DNS 服務
+**互動式輸入**：
+- 網域 FQDN（可按 Enter 使用預設）
+- NetBIOS 名稱（可按 Enter 使用自動推算值）
+- DSRM 管理員密碼
 
 **執行後**：系統會自動重啟
 
 ---
 
 #### 03-verifyAD.ps1
-**功能：驗證 AD 與 DNS 服務狀態**
+**功能：驗證 AD DS 安裝與 DNS 服務狀態**
+
+**主要功能**：
+- ✅ 支援自訂驗證的網域 FQDN（預設：tcivs.com.tw）
+- ✅ 自動比對 NetBIOS 名稱
 
 **驗證項目**：
-- 網域物件資訊（DNS 根網域、NetBIOS 名稱、基礎結構主機、網域功能等級）
-- 網域控制站服務可用性測試
-- DNS 區域建立狀態
-- AD DS 和 DNS 服務執行狀態
+1. ActiveDirectory 模組載入狀態
+2. 取得並顯示 AD 網域資訊（DNSRoot、NetBIOSName）
+3. 服務狀態檢查：
+   - NTDS（Active Directory Domain Services）
+   - DNS（DNS 伺服器）
+   - Netlogon（網路登入）
+4. DNS 區域檢查：
+   - 主網域區域（tcivs.com.tw）
+   - _msdcs 區域
+5. nltest 網域控制站可用性測試
+6. SRV 記錄解析（LDAP/DC）
+
+**輸出格式**：
+- [通過] / [失敗] 明確標示各項檢查結果
+- [警告] 標示需要注意但非錯誤的項目
 
 ---
 
 ### 階段 3：DNS 服務
 
 #### 04-createDNS.ps1
-**功能：建立 DNS 正反向查詢區及主機記錄**
+**功能：安裝/建立 DNS 正反向解析區並新增主機紀錄**
 
 **主要功能**：
-- 建立 AD 整合的正向查詢區（tcivs.com.tw）
-- 建立反向查詢區（172.16.xx.0/24）
-- 自動新增主機記錄（A Records）：
-  - Branch-xx (172.16.xx.254) + PTR
-  - Business-xx (172.16.xx.100) + PTR
-  - HR-xx (172.16.xx.200) + PTR
-  - Customer-xx (172.16.xx.50) - 僅 A 記錄
-  - www（指向 Branch-xx）+ PTR
-  - linux（指向 Business-xx）+ PTR
+- ✅ CmdletBinding 支援 -WhatIf 預覽
+- ✅ 權限與模組檢查（ActiveDirectory、DnsServer）
+- ✅ 自動同步目前 AD 網域名稱
+- ✅ 建立 AD 整合的正向查詢區
+- ✅ 建立反向查詢區（172.16.xx.0/24）
+- ✅ 自動新增主機記錄（A Records）+ PTR
 
-**支援功能**：
-- 互動式輸入主機名稱
-- 自動建立對應 PTR 記錄
-- 完整的驗證輸出
+**參數化支援**：
+| 參數 | 說明 | 預設值 |
+|------|------|--------|
+| -DomainFqdn | 網域 FQDN | tcivs.com.tw |
+| -SitePrefix | IPv4 前兩段 | 172.16 |
+| -XX | 組別編號 | 01 |
+| -BranchName | Branch 主機名 | Branch-XX |
+| -BusinessName | Business 主機名 | Business-XX |
+| -HRName | HR 主機名 | HR-XX |
+| -CustomerName | Customer 主機名 | Customer-XX |
+
+**自動建立的記錄**：
+- Branch-xx (172.16.xx.254) + PTR
+- Business-xx (172.16.xx.100) + PTR
+- HR-xx (172.16.xx.200) + PTR
+- Customer-xx (172.16.xx.50) - 僅 A 記錄
+- www（CNAME → Branch-xx）+ PTR
+- linux（CNAME → Business-xx）+ PTR
 
 **使用範例**：
 ```powershell
-.\04-createDNS.ps1                    # 互動式輸入
-.\04-createDNS.ps1 -XX "15"           # 指定崗位
+.\04-createDNS.ps1                              # 使用預設值
+.\04-createDNS.ps1 -XX "15"                     # 指定組別
+.\04-createDNS.ps1 -XX "15" -WhatIf             # 預覽不執行
 ```
 
 ---
@@ -138,37 +186,60 @@
 ### 階段 4：憑證服務
 
 #### 05-installADCS.ps1
-**功能：安裝企業根 CA 並設定憑證範本**
+**功能：安裝 AD CS 企業根 CA（Enterprise Root CA）**
 
-**完整功能**：
-- 安裝 ADCS-Cert-Authority 角色
-- 建立企業根 CA（TCIVS-ROOT-CA）
-- 設定 CA 參數：
-  - 金鑰長度：2048 位元
-  - 雜湊演算法：SHA256
-  - 有效期限：10 年
-- 匯出根憑證並發佈到 Active Directory
-- 設定 CRL 和 AIA 發佈路徑
-- 啟用 WebServer 憑證範本
-- 設定網域電腦自動註冊權限
-- 建立並連結群組原則（自動憑證註冊）
+**主要功能**：
+- ✅ 系統管理員 / DC / 模組檢查
+- ✅ 自動同步目前 AD 網域名稱
+- ✅ 安裝 ADCS-Cert-Authority 角色
+- ✅ 建立企業根 CA
+- ✅ 匯出根憑證並發佈到 AD（RootCA / NTAuthCA）
+- ✅ 設定 CRL / AIA 發佈路徑
+- ✅ 啟用 WebServer 憑證範本權限
+- ✅ 建立並連結自動註冊 GPO
+
+**參數化支援**：
+| 參數 | 說明 | 預設值 |
+|------|------|--------|
+| -DomainFqdn | 網域 FQDN | tcivs.com.tw |
+| -CaCommonName | CA 名稱 | TCIVS-ROOT-CA |
+| -KeyLength | 金鑰長度 | 2048 |
+| -HashAlgorithm | 雜湊演算法 | SHA256 |
+| -ValidityYears | 有效期限（年） | 10 |
+| -RootCerPath | 根憑證匯出路徑 | C:\PKI\TCIVS-ROOT-CA.cer |
+| -CRLPath | CRL 路徑 | C:\PKI\CRL |
+| -GpoName | GPO 名稱 | TCIVS-Cert-AutoEnrollment |
+| -WebTemplate | 憑證範本 | WebServer |
 
 **輸出檔案**：
-- C:\PKI\TCIVS-ROOT-CA.cer
-- C:\PKI\CRL\
+- C:\PKI\TCIVS-ROOT-CA.cer（根憑證）
+- C:\PKI\CRL\（CRL 目錄）
 
 ---
 
 #### 06-verifyCA.ps1
-**功能：驗證憑證授權單位設定**
+**功能：驗證憑證授權單位設定（評分前自檢清單）**
 
-**驗證項目**：
-- 憑證服務執行狀態
-- CA 詳細資訊
-- AD 中已發佈的根憑證
-- NTAuth 憑證存放區
-- CA 已啟用的憑證範本
-- 客戶端信任狀態
+**驗證命令**：
+```powershell
+# 查詢 CA 服務狀態
+Get-Service CertSvc
+
+# 查詢 CA 資訊
+certutil -ca.info
+
+# 檢視 AD 中已發佈的根憑證
+certutil -enterprise -viewstore root
+
+# 檢視 NTAuth 憑證存放區
+certutil -enterprise -viewstore ntauth
+
+# 列出 CA 已啟用的憑證範本
+certutil -catemplates
+
+# 客戶端檢查是否已信任根 CA
+certutil -store -enterprise root | findstr /C:"TCIVS-ROOT-CA"
+```
 
 ---
 
@@ -212,36 +283,69 @@
 #### 09-installDHCP.ps1
 **功能：安裝與設定 DHCP 伺服器**
 
-**完整功能**：
-- 安裝 DHCP 伺服器角色
-- 在 AD 中授權 DHCP 伺服器
-- 建立 DHCP 範圍（172.16.xx.150-200）
-- 設定 DHCP 選項：
-  - 選項 3：路由器（預設閘道）
-  - 選項 6：DNS 伺服器
-  - 選項 15：DNS 網域名稱
-- 新增 HR-xx 的固定 IP 保留
+**主要功能**：
+- ✅ 權限與環境檢查（管理員 / DC / 模組）
+- ✅ 自動同步目前 AD 網域名稱
+- ✅ 安裝 DHCP 伺服器角色
+- ✅ 在 AD 中授權 DHCP 伺服器
+- ✅ 建立/重建 DHCP 範圍
+- ✅ 設定 DHCP 選項
+- ✅ 支援 HR-xx 固定 IP 保留（選填 MAC）
 
-**設定參數**：
+**參數化支援**：
+| 參數 | 說明 | 預設值 |
+|------|------|--------|
+| -DomainFqdn | 網域 FQDN | tcivs.com.tw |
+| -XX | 組別編號 | 01 |
+| -ScopeName | 範圍名稱 | TCIVS-DHCP-Scope |
+
+**DHCP 範圍設定**：
+- 範圍：172.16.xx.150 - 172.16.xx.200
+- 排除：172.16.xx.185 - 172.16.xx.200
+- Gateway：172.16.xx.1
+- DNS：172.16.xx.254
 - 租約期限：8 天
-- 支援輸入 HR-xx 的 MAC 位址
+
+**DHCP 選項**：
+- 選項 3：路由器（預設閘道）
+- 選項 6：DNS 伺服器
+- 選項 15：DNS 網域名稱
+
+**HR-xx 保留**：
+- 可選填 MAC 地址（格式：AA-BB-CC-DD-EE-FF）
+- 保留 IP：172.16.xx.200
 
 ---
 
 #### 10-configureNTP.ps1
-**功能：設定 NTP 授時伺服器**
+**功能：設定 NTP 時間來源**
 
-**功能特點**：
-- 將伺服器設為可靠的時間來源
-- 可選擇設定外部 NTP 伺服器（台灣標準時間）
-- 設定 Windows Time 服務自動啟動
-- 強制同步時間
-- 網域成員自動同步
+**主要功能**：
+- ✅ 系統管理員權限檢查
+- ✅ 自動檢查是否為 PDC Emulator（建議在 PDC 上設定）
+- ✅ 將伺服器設為可靠的時間來源
+- ✅ 設定外部 NTP 伺服器
+- ✅ 設定 Windows Time 服務自動啟動
+- ✅ 強制立即同步時間
 
-**外部 NTP 來源**：
-- time.stdtime.gov.tw
+**參數化支援**：
+| 參數 | 說明 | 預設值 |
+|------|------|--------|
+| -NtpServers | NTP 伺服器清單 | time.tcivs.com.tw |
+
+**驗證命令**：
+```powershell
+w32tm /query /status         # 查詢時間狀態
+w32tm /query /configuration  # 查詢設定
+w32tm /query /peers          # 查詢同步來源
+```
+
+**可用的外部 NTP 來源**：
+- time.stdtime.gov.tw（台灣標準時間）
 - tock.stdtime.gov.tw
 - watch.stdtime.gov.tw
+- time.google.com
+- time.windows.com
 
 ---
 
