@@ -1,363 +1,223 @@
-﻿<# 
-===============================================================================
-  Windows Server 2022 - DNS 正反向查詢區一鍵部署
-  113 年工科技藝競賽 電腦修護第一站（DNS 正反解 + 主機紀錄）
-===============================================================================
-  
-  前置需求：
-   - 已執行 01-creatAD.ps1 或 03-installADDSForest.ps1（建立 AD DS 和基本 DNS）
-   - 伺服器已成為網域控制站
-   - DNS 服務已啟動
-  
-  腳本功能：
-   1. 確認並安裝 DNS Server 角色（如尚未安裝）
-   2. 建立 AD 整合的正向查詢區（Forward Lookup Zone: tcivs.com.tw）
-   3. 建立 AD 整合的反向查詢區（Reverse Lookup Zone: 172.16.xx.0/24）
-   4. 新增主機記錄（A Records）：
-      - Branch-xx   (172.16.xx.254) - 主要伺服器
-      - Business-xx (172.16.xx.100) - Fedora 商務主機
-      - HR-xx       (172.16.xx.200) - 人力資源主機
-      - Customer-xx (172.16.xx.50)  - 客戶主機（僅 A 記錄）
-      - www         (指向 Branch-xx) - 網站服務
-      - linux       (指向 Business-xx) - Linux 主機別名
-   5. 自動建立對應的 PTR 記錄（反向解析）
-  
-  使用範例：
-   .\07-DNS_ForwRever.ps1 -XX "01"
-   .\07-DNS_ForwRever.ps1 -XX "15" -BranchName "Branch-15"
-===============================================================================
-#>
-
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [Parameter(HelpMessage = "網域的完整網域名稱（FQDN），應與 01-creatAD.ps1 中設定一致")]
+    [Parameter(HelpMessage = "網域 FQDN，預設 tcivs.com.tw")]
     [ValidateNotNullOrEmpty()]
     [string]$DomainFqdn = "tcivs.com.tw",
-    
-    [Parameter(HelpMessage = "IP 位址前綴（前兩個八位元組）")]
+
+    [Parameter(HelpMessage = "IPv4 網段前兩段，例如 172.16")]
     [ValidatePattern('^\d{1,3}\.\d{1,3}$')]
     [string]$SitePrefix = "172.16",
-    
-    [Parameter(HelpMessage = "崗位編號（01-99），用於組成 IP 位址的第三個八位元組")]
+
+    [Parameter(HelpMessage = "組別編號（01-99），用於第三段位址")]
     [ValidatePattern('^\d{1,2}$')]
-    [string]$XX = "",
-    
-    [Parameter(HelpMessage = "Branch 主機名稱")]
-    [ValidateNotNullOrEmpty()]
-    [string]$BranchName = "",
-    
-    [Parameter(HelpMessage = "Business 主機名稱（Fedora）")]
-    [ValidateNotNullOrEmpty()]
-    [string]$BusinessName = "",
-    
-    [Parameter(HelpMessage = "HR 主機名稱")]
-    [ValidateNotNullOrEmpty()]
-    [string]$HRName = "",
-    
-    [Parameter(HelpMessage = "Customer 主機名稱")]
-    [ValidateNotNullOrEmpty()]
-    [string]$CustomerName = ""
+    [string]$XX = "01",
+
+    [Parameter(HelpMessage = "Branch 主機名稱，預設 Branch-XX")]
+    [string]$BranchName,
+
+    [Parameter(HelpMessage = "Business/Fedora 主機名稱，預設 Business-XX")]
+    [string]$BusinessName,
+
+    [Parameter(HelpMessage = "HR 主機名稱，預設 HR-XX")]
+    [string]$HRName,
+
+    [Parameter(HelpMessage = "Customer 主機名稱，預設 Customer-XX")]
+    [string]$CustomerName
 )
 
-# ===============================
-# 互動式輸入區段
-# ===============================
-Write-Host "===============================================================================" -ForegroundColor Cyan
-Write-Host "  Windows Server 2022 - DNS 正反向查詢區設定" -ForegroundColor Cyan
-Write-Host "===============================================================================`n" -ForegroundColor Cyan
-
-# 如果未提供崗位編號，則提示輸入
-if ([string]::IsNullOrWhiteSpace($XX)) {  # 檢查崗位編號是否為空
-    $XX = Read-Host "請輸入崗位編號（例如：01）"  # 提示使用者輸入崗位編號
-    if ([string]::IsNullOrWhiteSpace($XX)) {  # 若仍為空則使用預設值
-        $XX = "01"  # 設定預設崗位編號為 01
-        Write-Host "使用預設崗位編號：$XX" -ForegroundColor Yellow  # 顯示使用預設值訊息
-    }
+# ===== 共用輸出 =====
+function Write-Result {
+    param([bool]$Ok, [string]$Message)
+    if ($Ok) { Write-Host "[通過] $Message" -ForegroundColor Green }
+    else { Write-Host "[失敗] $Message" -ForegroundColor Red }
 }
 
-# 如果未提供 Branch 主機名稱，則提示輸入
-if ([string]::IsNullOrWhiteSpace($BranchName)) {  # 檢查 Branch 主機名稱是否為空
-    $defaultBranch = "Branch-$XX"  # 根據崗位編號建立預設主機名稱
-    $inputBranch = Read-Host "請輸入 Branch 主機名稱（按 Enter 使用預設值：$defaultBranch）"  # 提示使用者輸入或使用預設值
-    $BranchName = if ([string]::IsNullOrWhiteSpace($inputBranch)) { $defaultBranch } else { $inputBranch }  # 若使用者未輸入則使用預設值
-    Write-Host "Branch 主機名稱：$BranchName" -ForegroundColor Green  # 顯示最終使用的主機名稱
-}
+function Write-Warn($msg) { Write-Host "[警告] $msg" -ForegroundColor Yellow }
 
-# 如果未提供 Business 主機名稱，則提示輸入
-if ([string]::IsNullOrWhiteSpace($BusinessName)) {  # 檢查 Business 主機名稱是否為空
-    $defaultBusiness = "Business-$XX"  # 根據崗位編號建立預設主機名稱
-    $inputBusiness = Read-Host "請輸入 Business 主機名稱（按 Enter 使用預設值：$defaultBusiness）"  # 提示使用者輸入或使用預設值
-    $BusinessName = if ([string]::IsNullOrWhiteSpace($inputBusiness)) { $defaultBusiness } else { $inputBusiness }  # 若使用者未輸入則使用預設值
-    Write-Host "Business 主機名稱：$BusinessName" -ForegroundColor Green  # 顯示最終使用的主機名稱
-}
-
-# 如果未提供 HR 主機名稱，則提示輸入
-if ([string]::IsNullOrWhiteSpace($HRName)) {  # 檢查 HR 主機名稱是否為空
-    $defaultHR = "HR-$XX"  # 根據崗位編號建立預設主機名稱
-    $inputHR = Read-Host "請輸入 HR 主機名稱（按 Enter 使用預設值：$defaultHR）"  # 提示使用者輸入或使用預設值
-    $HRName = if ([string]::IsNullOrWhiteSpace($inputHR)) { $defaultHR } else { $inputHR }  # 若使用者未輸入則使用預設值
-    Write-Host "HR 主機名稱：$HRName" -ForegroundColor Green  # 顯示最終使用的主機名稱
-}
-
-# 如果未提供 Customer 主機名稱，則提示輸入
-if ([string]::IsNullOrWhiteSpace($CustomerName)) {  # 檢查 Customer 主機名稱是否為空
-    $defaultCustomer = "Customer-$XX"  # 根據崗位編號建立預設主機名稱
-    $inputCustomer = Read-Host "請輸入 Customer 主機名稱（按 Enter 使用預設值：$defaultCustomer）"  # 提示使用者輸入或使用預設值
-    $CustomerName = if ([string]::IsNullOrWhiteSpace($inputCustomer)) { $defaultCustomer } else { $inputCustomer }  # 若使用者未輸入則使用預設值
-    Write-Host "Customer 主機名稱：$CustomerName" -ForegroundColor Green  # 顯示最終使用的主機名稱
-}
-
-Write-Host "`n按任意鍵繼續..." -ForegroundColor Yellow  # 提示使用者確認輸入
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")  # 等待使用者按鍵
-Write-Host ""  # 空行分隔
-
-### ======================================================================
-### Step 0. 前置檢查（確保能接續 01~06 腳本）
-### ======================================================================
-Write-Host "`n======================================" -ForegroundColor Cyan
-Write-Host "  DNS 正反向查詢區部署腳本" -ForegroundColor Cyan
-Write-Host "======================================`n" -ForegroundColor Cyan
-
-# 檢查是否為網域控制站
-Write-Host "正在檢查前置條件..." -ForegroundColor Yellow
-
-try {
-    $dcRole = Get-WmiObject -Class Win32_ComputerSystem | Select-Object -ExpandProperty DomainRole
-    if ($dcRole -lt 4) {  # DomainRole < 4 表示不是網域控制站
-        Write-Host "❌ 錯誤：此伺服器尚未成為網域控制站" -ForegroundColor Red
-        Write-Host "   請先執行 01-creatAD.ps1 或 03-installADDSForest.ps1" -ForegroundColor Yellow
-        exit 1
-    }
-    Write-Host "✅ 確認：伺服器是網域控制站" -ForegroundColor Green
-} catch {
-    Write-Host "⚠️  警告：無法確認網域控制站狀態，繼續執行..." -ForegroundColor Yellow
-}
-
-# 檢查 AD DS 服務狀態
-try {
-    $adService = Get-Service -Name NTDS -ErrorAction Stop
-    if ($adService.Status -ne 'Running') {
-        Write-Host "❌ 錯誤：Active Directory 網域服務未執行" -ForegroundColor Red
-        Write-Host "   請確認已正確安裝並啟動 AD DS" -ForegroundColor Yellow
-        exit 1
-    }
-    Write-Host "✅ 確認：Active Directory 網域服務正在執行" -ForegroundColor Green
-} catch {
-    Write-Host "❌ 錯誤：找不到 Active Directory 網域服務" -ForegroundColor Red
-    Write-Host "   請先執行 01-creatAD.ps1 安裝 AD DS" -ForegroundColor Yellow
+# ===== 權限檢查 =====
+$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+    Write-Result $false "請以系統管理員身分執行此腳本。"
     exit 1
 }
 
-# 驗證網域名稱是否與 AD 一致
+Write-Host "===============================================================================" -ForegroundColor Cyan
+Write-Host "  Windows Server 2022 - 安裝/建立 DNS 正反向解析區並新增主機紀錄" -ForegroundColor Cyan
+Write-Host "===============================================================================`n" -ForegroundColor Cyan
+
+# ===== 載入模組 =====
 try {
-    $currentDomain = (Get-ADDomain -ErrorAction Stop).DNSRoot
-    if ($currentDomain -ne $DomainFqdn) {
-        Write-Host "⚠️  警告：指定的網域名稱 ($DomainFqdn) 與實際 AD 網域 ($currentDomain) 不一致" -ForegroundColor Yellow
-        Write-Host "   將使用實際 AD 網域名稱：$currentDomain" -ForegroundColor Yellow
-        $DomainFqdn = $currentDomain
-    } else {
-        Write-Host "✅ 確認：網域名稱一致 ($DomainFqdn)" -ForegroundColor Green
-    }
+    Import-Module ActiveDirectory -ErrorAction Stop
+    Write-Result $true "已載入 ActiveDirectory 模組"
 } catch {
-    Write-Host "⚠️  警告：無法取得 AD 網域資訊，將使用指定的網域名稱：$DomainFqdn" -ForegroundColor Yellow
+    Write-Result $false "無法載入 ActiveDirectory 模組：$($_.Exception.Message)"
+    exit 1
 }
 
-Write-Host "`n前置檢查完成，開始部署 DNS 設定...`n" -ForegroundColor Green
-
-### ------------------------------
-### Step 1. 計算 IP 與 Zone
-### ------------------------------
-$Net24 = "$SitePrefix.$XX"          # ex: 172.16.01 → 172.16.1  # 組合網路位址的前三個八位元組（例如：172.16.01）
-$Net24 = $Net24.Replace(".0", ".")  # 修正格式 (01→1)  # 移除前導零，將 .01 修正為 .1
-
-$BranchIP   = "$Net24.254"   # Branch-xx  # 設定 Branch 主機的 IP 位址為網段的 .254（例如：172.16.1.254）
-$BusinessIP = "$Net24.100"   # Fedora Business-xx  # 設定 Business 主機（Fedora）的 IP 位址為網段的 .100
-$HRIP       = "$Net24.200"   # HR-xx  # 設定 HR 主機的 IP 位址為網段的 .200
-$CustomerIP = "$Net24.50"    # Customer-xx (WAN 給定示例，不會在本網段)  # 設定 Customer 主機的 IP 位址為網段的 .50
-$WWWIP      = $BranchIP      # 題目：網站架在 Branch-xx  # 設定 www 主機記錄指向 Branch 主機的 IP 位址
-$LinuxIP    = $BusinessIP    # 題目：linux = Business-xx  # 設定 linux 主機記錄指向 Business 主機的 IP 位址
-
-$ForwardZone = $DomainFqdn  # 設定正向查詢區名稱為網域 FQDN（tcivs.com.tw）
-$ReverseZone = "$XX.16.172.in-addr.arpa"   # ex: 1.16.172.in-addr.arpa  # 設定反向查詢區名稱，格式為倒序的 IP 加上 in-addr.arpa（例如：1.16.172.in-addr.arpa）
-
-Write-Host "=== DNS Zone ===" -ForegroundColor Cyan  # 以青色顯示 DNS 區域資訊標題
-Write-Host " Forward Zone : $ForwardZone"  # 顯示正向查詢區名稱
-Write-Host " Reverse Zone : $ReverseZone"  # 顯示反向查詢區名稱
-Write-Host " Branch-xx IP : $BranchIP"  # 顯示 Branch 主機的 IP 位址
-Write-Host " Business-xx IP : $BusinessIP"  # 顯示 Business 主機的 IP 位址
-Write-Host " HR-xx IP      : $HRIP"  # 顯示 HR 主機的 IP 位址
-Write-Host "================`n"  # 顯示分隔線並換行
-
-### ------------------------------
-### Step 2. 確認並安裝 DNS Server 角色
-### ------------------------------
-Write-Host "=== Step 2. 確認 DNS Server 角色狀態 ===" -ForegroundColor Cyan
-
-# 檢查 DNS 角色是否已安裝
-$dnsFeature = Get-WindowsFeature -Name DNS -ErrorAction SilentlyContinue
-
-if ($dnsFeature -and $dnsFeature.Installed) {
-    Write-Host "✅ DNS Server 角色已安裝（可能由 01-creatAD.ps1 安裝）" -ForegroundColor Green
-    
-    # 檢查 DNS 服務狀態
-    $dnsService = Get-Service -Name DNS -ErrorAction SilentlyContinue
-    if ($dnsService -and $dnsService.Status -eq 'Running') {
-        Write-Host "✅ DNS 服務正在執行中" -ForegroundColor Green
-    } elseif ($dnsService) {
-        Write-Host "⚠️  DNS 服務已安裝但未執行，正在啟動..." -ForegroundColor Yellow
-        Start-Service -Name DNS
-        Write-Host "✅ DNS 服務已啟動" -ForegroundColor Green
-    }
-} else {
-    Write-Host "⚠️  DNS Server 角色尚未安裝，正在安裝..." -ForegroundColor Yellow
-    Install-WindowsFeature DNS -IncludeManagementTools | Out-Null
-    Write-Host "✅ DNS Server 角色安裝完成" -ForegroundColor Green
+try {
+    Import-Module DnsServer -ErrorAction Stop
+    Write-Result $true "已載入 DnsServer 模組"
+} catch {
+    Write-Result $false "無法載入 DnsServer 模組：$($_.Exception.Message)"
+    exit 1
 }
 
+# ===== 確認本機為網域控制站 =====
+try {
+    $domainInfo = Get-ADDomain -ErrorAction Stop
+} catch {
+    Write-Result $false "無法取得 AD 網域資訊，請先完成 AD DS 安裝。"
+    exit 1
+}
+
+$role = (Get-CimInstance -ClassName Win32_ComputerSystem).DomainRole
+if ($role -lt 4) {
+    Write-Result $false "本機並非網域控制站，請先建立 AD DS。"
+    exit 1
+}
+
+if ($domainInfo.DNSRoot -ne $DomainFqdn) {
+    Write-Warn "目前網域為 $($domainInfo.DNSRoot)，改用此網域建立 DNS 區域。"
+    $DomainFqdn = $domainInfo.DNSRoot
+}
+
+# ===== 處理組別編號與預設主機名 =====
+$xxInt = [int]$XX
+$xxStr = $xxInt.ToString()
+
+if ([string]::IsNullOrWhiteSpace($BranchName))   { $BranchName   = "Branch-$xxStr" }
+if ([string]::IsNullOrWhiteSpace($BusinessName)) { $BusinessName = "Business-$xxStr" }
+if ([string]::IsNullOrWhiteSpace($HRName))       { $HRName       = "HR-$xxStr" }
+if ([string]::IsNullOrWhiteSpace($CustomerName)) { $CustomerName = "Customer-$xxStr" }
+
+# ===== 計算網段與區域名稱 =====
+$netIdParts = "$SitePrefix.$xxStr.0".Split(".")
+if ($netIdParts.Count -lt 3) {
+    Write-Result $false "SitePrefix/XX 無法組成有效 IPv4 網段，請確認。"
+    exit 1
+}
+$net24Prefix = "$($netIdParts[0]).$($netIdParts[1]).$($netIdParts[2])"
+$NetworkId   = "$net24Prefix.0/24"
+$ReverseZone = "$($netIdParts[2]).$($netIdParts[1]).$($netIdParts[0]).in-addr.arpa"
+
+$BranchIP   = "$net24Prefix.254"
+$BusinessIP = "$net24Prefix.100"
+$HRIP       = "$net24Prefix.200"
+$CustomerIP = "$net24Prefix.50"
+$WWWIP      = $BranchIP
+$LinuxIP    = $BusinessIP
+
+Write-Host "將建立/確保以下區域與主機記錄：" -ForegroundColor Cyan
+Write-Host "  Forward Zone : $DomainFqdn"
+Write-Host "  Reverse Zone : $ReverseZone (NetworkId $NetworkId)"
+Write-Host "  Branch IP    : $BranchIP"
+Write-Host "  Business IP  : $BusinessIP"
+Write-Host "  HR IP        : $HRIP"
+Write-Host "  Customer IP  : $CustomerIP"
 Write-Host ""
 
-### ------------------------------
-### Step 3. 建立正向查詢區（Forward Lookup Zone）
-### ------------------------------
-Write-Host "=== Step 3. 建立正向查詢區 ===" -ForegroundColor Cyan
+# ===== 安裝並啟動 DNS 服務 =====
+$dnsFeature = Get-WindowsFeature -Name DNS -ErrorAction SilentlyContinue
+if (-not $dnsFeature -or -not $dnsFeature.Installed) {
+    Write-Host "安裝 DNS Server 角色與管理工具..." -ForegroundColor Yellow
+    Install-WindowsFeature DNS -IncludeManagementTools | Out-Null
+}
+$dnsSvc = Get-Service -Name DNS -ErrorAction SilentlyContinue
+if ($dnsSvc -and $dnsSvc.Status -ne 'Running') {
+    Start-Service -Name DNS
+}
+Write-Result $true "DNS 服務已啟用"
 
-$existingForwardZone = Get-DnsServerZone -Name $ForwardZone -ErrorAction SilentlyContinue
-
-if ($existingForwardZone) {
-    Write-Host "✅ 正向查詢區 '$ForwardZone' 已存在（可能由 AD DS 自動建立）" -ForegroundColor Green
-    Write-Host "   區域類型: $($existingForwardZone.ZoneType)" -ForegroundColor Gray
-} else {
-    Write-Host "正在建立 AD 整合的主要正向查詢區..." -ForegroundColor Yellow
+# ===== 建立/確認 Forward Zone =====
+try {
+    $existingForward = Get-DnsServerZone -Name $DomainFqdn -ErrorAction Stop
+    Write-Result $true "Forward Zone '$DomainFqdn' 已存在（$($existingForward.ZoneType)）"
+} catch {
+    Write-Host "建立 Forward Zone '$DomainFqdn' ..." -ForegroundColor Yellow
     try {
-        Add-DnsServerPrimaryZone -Name $ForwardZone -ReplicationScope "Domain" -ErrorAction Stop | Out-Null
-        Write-Host "✅ 正向查詢區 '$ForwardZone' 建立成功" -ForegroundColor Green
+        Add-DnsServerPrimaryZone -Name $DomainFqdn -ReplicationScope Domain -DynamicUpdate Secure -ErrorAction Stop | Out-Null
+        Write-Result $true "Forward Zone '$DomainFqdn' 建立完成"
     } catch {
-        Write-Host "❌ 錯誤：無法建立正向查詢區 - $($_.Exception.Message)" -ForegroundColor Red
+        Write-Result $false "建立 Forward Zone 失敗：$($_.Exception.Message)"
         exit 1
     }
 }
 
-Write-Host ""
-
-### ------------------------------
-### Step 4. 建立反向查詢區（Reverse Lookup Zone）
-### ------------------------------
-Write-Host "=== Step 4. 建立反向查詢區 (IPv4 /24) ===" -ForegroundColor Cyan
-
-$existingReverseZone = Get-DnsServerZone -Name $ReverseZone -ErrorAction SilentlyContinue
-
-if ($existingReverseZone) {
-    Write-Host "✅ 反向查詢區 '$ReverseZone' 已存在" -ForegroundColor Green
-    Write-Host "   區域類型: $($existingReverseZone.ZoneType)" -ForegroundColor Gray
-} else {
-    Write-Host "正在建立 AD 整合的主要反向查詢區..." -ForegroundColor Yellow
-    Write-Host "   網路 ID: $NetworkID" -ForegroundColor Gray
+# ===== 建立/確認 Reverse Zone (/24) =====
+try {
+    $existingReverse = Get-DnsServerZone -Name $ReverseZone -ErrorAction Stop
+    Write-Result $true "Reverse Zone '$ReverseZone' 已存在（$($existingReverse.ZoneType)）"
+} catch {
+    Write-Host "建立 Reverse Zone $ReverseZone ..." -ForegroundColor Yellow
     try {
-        Add-DnsServerPrimaryZone -NetworkId $NetworkID -ReplicationScope "Domain" -ErrorAction Stop | Out-Null
-        Write-Host "✅ 反向查詢區 '$ReverseZone' 建立成功" -ForegroundColor Green
+        Add-DnsServerPrimaryZone -NetworkId $NetworkId -ReplicationScope Domain -DynamicUpdate Secure -ErrorAction Stop | Out-Null
+        Write-Result $true "Reverse Zone '$ReverseZone' 建立完成"
     } catch {
-        Write-Host "❌ 錯誤：無法建立反向查詢區 - $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "   將繼續執行，但 PTR 記錄可能無法建立" -ForegroundColor Yellow
+        Write-Result $false "建立 Reverse Zone 失敗：$($_.Exception.Message)"
+        Write-Warn "將跳過 PTR 建立。"
+        $ReverseZone = $null
     }
 }
 
-Write-Host ""
-
-### ------------------------------
-### Step 5. 新增主機紀錄（含 PTR）
-### ------------------------------
-Write-Host "=== Step 5. 新增 A 與 PTR 記錄 ===" -ForegroundColor Cyan  # 以青色顯示步驟 5 標題
-
-# 定義函式：新增 DNS A 記錄和 PTR 記錄
-# 符合 PowerShell 動詞-名詞命名規範
+# ===== 函式：新增 A / PTR =====
 function Add-DnsRecordWithPtr {
-    [CmdletBinding()]  # 啟用 Cmdlet 繫結，提供進階功能支援
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]  # 必要參數：主機名稱
-        [string]$HostName,
-        
-        [Parameter(Mandatory = $true)]  # 必要參數：IPv4 位址
-        [string]$IPv4Address,
-        
-        [Parameter(Mandatory = $false)]  # 可選參數：是否建立 PTR 記錄
+        [Parameter(Mandatory = $true)][string]$HostName,
+        [Parameter(Mandatory = $true)][string]$IPv4Address,
         [bool]$CreatePtr = $true
     )
-    
-    Write-Host "新增 $HostName  →  $IPv4Address" -ForegroundColor White
-    
-    # 新增或更新 A 記錄（主機名稱到 IP 位址的對應）
-    Remove-DnsServerResourceRecord -ZoneName $ForwardZone -RRType A -Name $HostName -Force -ErrorAction SilentlyContinue
-    Add-DnsServerResourceRecordA -Name $HostName -ZoneName $ForwardZone -IPv4Address $IPv4Address -AllowUpdateAny -TimeToLive 00:05:00
-    
-    # 新增 PTR 記錄（IP 位址到主機名稱的反向對應）
-    if ($CreatePtr) {
-        $LastOctet = $IPv4Address.Split(".")[-1]  # 取得 IP 位址的最後一個八位元組（主機部分）
-        Remove-DnsServerResourceRecord -ZoneName $ReverseZone -RRType PTR -Name $LastOctet -Force -ErrorAction SilentlyContinue
-        Add-DnsServerResourceRecordPtr -ZoneName $ReverseZone -Name $LastOctet -PtrDomainName "$HostName.$ForwardZone"
+    Write-Host "  設定 $HostName -> $IPv4Address" -ForegroundColor White
+    Remove-DnsServerResourceRecord -ZoneName $DomainFqdn -RRType A -Name $HostName -Force -ErrorAction SilentlyContinue
+    Add-DnsServerResourceRecordA -Name $HostName -ZoneName $DomainFqdn -IPv4Address $IPv4Address -AllowUpdateAny -TimeToLive 00:05:00
+
+    if ($CreatePtr -and $ReverseZone) {
+        $lastOctet = $IPv4Address.Split(".")[-1]
+        Remove-DnsServerResourceRecord -ZoneName $ReverseZone -RRType PTR -Name $lastOctet -Force -ErrorAction SilentlyContinue
+        Add-DnsServerResourceRecordPtr -ZoneName $ReverseZone -Name $lastOctet -PtrDomainName "$HostName.$DomainFqdn"
     }
 }
 
-# 題目要求的主機紀錄（配合前面 01~06 腳本的網域設定）
-Add-DnsRecordWithPtr -HostName $BranchName -IPv4Address $BranchIP
+# ===== 新增主機紀錄 =====
+Add-DnsRecordWithPtr -HostName $BranchName   -IPv4Address $BranchIP
 Add-DnsRecordWithPtr -HostName $BusinessName -IPv4Address $BusinessIP
-Add-DnsRecordWithPtr -HostName $HRName -IPv4Address $HRIP
-Add-DnsRecordWithPtr -HostName "www" -IPv4Address $WWWIP
-Add-DnsRecordWithPtr -HostName "linux" -IPv4Address $LinuxIP
+Add-DnsRecordWithPtr -HostName $HRName       -IPv4Address $HRIP
+Add-DnsRecordWithPtr -HostName "www"         -IPv4Address $WWWIP
+Add-DnsRecordWithPtr -HostName "linux"       -IPv4Address $LinuxIP
+Write-Host "  設定 $CustomerName -> $CustomerIP (不建立 PTR)" -ForegroundColor White
+Remove-DnsServerResourceRecord -ZoneName $DomainFqdn -RRType A -Name $CustomerName -Force -ErrorAction SilentlyContinue
+Add-DnsServerResourceRecordA -Name $CustomerName -ZoneName $DomainFqdn -IPv4Address $CustomerIP -AllowUpdateAny -TimeToLive 00:05:00
 
-# Customer-xx → 不在同一網段（可能在 WAN），僅建立 A 記錄，不建立 PTR
-Write-Host "新增 $CustomerName A 記錄（無 PTR，因不在此 /24 網段）" -ForegroundColor Yellow
-Remove-DnsServerResourceRecord -ZoneName $ForwardZone -RRType A -Name $CustomerName -Force -ErrorAction SilentlyContinue
-Add-DnsServerResourceRecordA -Name $CustomerName -ZoneName $ForwardZone -IPv4Address $CustomerIP -AllowUpdateAny -TimeToLive 00:05:00
+# ===== 簡易驗證 =====
+Write-Host "`n檢視現有 DNS 區域：" -ForegroundColor Cyan
+Get-DnsServerZone | Where-Object { -not $_.IsAutoCreated } | Select-Object ZoneName, ZoneType, IsReverseLookupZone | Format-Table -AutoSize
 
-Write-Host "`n✅ DNS 安裝與所有主機紀錄設定完成！" -ForegroundColor Green
+Write-Host "`nForward Zone A 記錄：" -ForegroundColor Cyan
+Get-DnsServerResourceRecord -ZoneName $DomainFqdn -RRType A | Where-Object { $_.HostName -ne "@" } |
+    Select-Object HostName, @{Name='IPv4';Expression={$_.RecordData.IPv4Address}} | Format-Table -AutoSize
 
-### ------------------------------
-### Step 6. 驗證 DNS 設定
-### ------------------------------
-Write-Host "`n=== Step 6. 驗證 DNS 設定 ===" -ForegroundColor Cyan
-
-# 顯示所有 DNS 區域
-Write-Host "`n【DNS 區域清單】" -ForegroundColor White
-Get-DnsServerZone | Where-Object { -not $_.IsAutoCreated } | 
-    Select-Object ZoneName, ZoneType, IsReverseLookupZone | 
-    Format-Table -AutoSize
-
-# 顯示正向查詢區的 A 記錄
-Write-Host "【正向查詢區 A 記錄】" -ForegroundColor White
-Get-DnsServerResourceRecord -ZoneName $ForwardZone -RRType A | 
-    Where-Object { $_.HostName -notlike "@" } |
-    Select-Object HostName, @{Name='IPv4Address';Expression={$_.RecordData.IPv4Address}} | 
-    Format-Table -AutoSize
-
-# 顯示反向查詢區的 PTR 記錄
-Write-Host "【反向查詢區 PTR 記錄】" -ForegroundColor White
-$reverseRecords = Get-DnsServerResourceRecord -ZoneName $ReverseZone -RRType PTR -ErrorAction SilentlyContinue
-if ($reverseRecords) {
-    $reverseRecords | 
-        Where-Object { $_.HostName -notlike "@" } |
-        Select-Object HostName, @{Name='PtrDomainName';Expression={$_.RecordData.PtrDomainName}} | 
-        Format-Table -AutoSize
+Write-Host "`nReverse Zone PTR 記錄：" -ForegroundColor Cyan
+if ($ReverseZone) {
+    $ptrRecords = Get-DnsServerResourceRecord -ZoneName $ReverseZone -RRType PTR -ErrorAction SilentlyContinue
+    if ($ptrRecords) {
+        $ptrRecords | Select-Object HostName, @{Name='PtrDomainName';Expression={$_.RecordData.PtrDomainName}} | Format-Table -AutoSize
+    } else {
+        Write-Host "  (尚無 PTR 記錄或區域不存在)" -ForegroundColor Gray
+    }
 } else {
-    Write-Host "  (無 PTR 記錄或反向查詢區不存在)" -ForegroundColor Gray
+    Write-Host "  (略過，未建立 Reverse Zone)" -ForegroundColor Gray
 }
 
-# 測試 DNS 解析
-Write-Host "`n【DNS 解析測試】" -ForegroundColor White
+Write-Host "`n解析測試：" -ForegroundColor Cyan
 $testHosts = @($BranchName, $BusinessName, $HRName, "www", "linux", $CustomerName)
-foreach ($testHost in $testHosts) {
-    $fqdn = "$testHost.$DomainFqdn"
+foreach ($h in $testHosts) {
+    $fqdn = "$h.$DomainFqdn"
     try {
-        $result = Resolve-DnsName -Name $fqdn -Type A -ErrorAction Stop
-        Write-Host "  ✅ $fqdn → $($result.IPAddress)" -ForegroundColor Green
+        $res = Resolve-DnsName -Name $fqdn -Type A -ErrorAction Stop
+        Write-Result $true "$fqdn -> $($res.IPAddress)"
     } catch {
-        Write-Host "  ❌ $fqdn 解析失敗" -ForegroundColor Red
+        Write-Result $false "$fqdn 解析失敗"
     }
 }
 
-Write-Host "`n================================================" -ForegroundColor Cyan
-Write-Host "  DNS 部署完成！接續腳本執行順序：" -ForegroundColor Cyan
-Write-Host "  1. ✅ 01-creatAD.ps1 (已完成)" -ForegroundColor Gray
-Write-Host "  2. ✅ 02-verifyAD-DNS_status.ps1 (建議執行)" -ForegroundColor Gray
-Write-Host "  3. 🔄 04-installADCS-rootCA.ps1 (可選)" -ForegroundColor Gray
-Write-Host "  4. 🔄 06-install-IIS.ps1 (可選)" -ForegroundColor Gray
-Write-Host "================================================`n" -ForegroundColor Cyan
+Write-Host "`n[完成] DNS 區域與主機紀錄處理完畢。" -ForegroundColor Green
